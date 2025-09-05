@@ -8,3 +8,4 @@ razorpay
 replicate
 requests
 gunicorn
+setuptools
