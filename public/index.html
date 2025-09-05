@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>CaptionAI — AI Captions & Image Edits</title>
+
+  <!-- Meta -->
+  <meta name="description" content="Generate perfect social media captions and AI-powered image edits in seconds. Pay-as-you-go: ₹5 for captions, ₹10 for captions + edits." />
+  <meta name="theme-color" content="#007bff" />
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="CaptionAI — AI Captions & Image Edits" />
+  <meta property="og:description" content="Generate captions and AI-powered edits instantly. ₹5 for captions, ₹10 for captions + edits." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="/og-image.png" />
+  <meta property="og:url" content="https://yourdomain.com" />
+
+  <!-- Favicon -->
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Razorpay -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
+</head>
+
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <!-- Background wrapper -->
+  <div class="background" aria-hidden="true"></div>
+
+  <header class="site-header" role="banner">
+    <div class="container">
+      <h1>CaptionAI ✨</h1>
+      <p class="tagline">Generate the perfect social media post in seconds.</p>
+    </div>
+  </header>
+
+  <main id="main" class="container" role="main">
+    <form id="unified-form" class="card" novalidate aria-labelledby="form-title">
+      <div class="card__header">
+        <h2 id="form-title">Create Your Post</h2>
+        <p class="fineprint">Select a service, add details, choose language, then pay &amp; generate.</p>
+      </div>
+
+      <!-- Service Tier -->
+      <fieldset class="field">
+        <legend class="sr-only">Choose Service</legend>
+        <div class="tier-buttons" role="tablist" aria-label="Service tiers">
+          <button id="select-caption-tier" type="button" class="tier-button active" data-tier="caption" aria-selected="true">
+            ₹5 Caption Only <span class="badge" id="price-badge">₹5</span>
+          </button>
+          <button id="select-image-tier" type="button" class="tier-button" data-tier="image" aria-selected="false">
+            ₹10 Caption + Image Edits <span class="badge">₹10</span>
+          </button>
+        </div>
+        <input type="hidden" id="selected-tier" name="tier" value="caption">
+      </fieldset>
+
+      <!-- Description -->
+      <div class="field">
+        <div class="label-row">
+          <label for="post-description">Describe your photo or post idea</label>
+          <div class="counter" id="desc-counter" aria-live="polite">0 / 150</div>
+        </div>
+        <textarea id="post-description" name="description" rows="3" placeholder="e.g., Me hiking in the mountains, golden hour light, feeling adventurous..." required></textarea>
+        <p class="hint" id="platform-hint">Tip: Hook your idea in ~6 words. Keep it concrete.</p>
+      </div>
+
+      <!-- Image + edits (shown only when Image tier selected) -->
+      <div id="image-fields" class="hidden">
+        <div class="field">
+          <label for="image-upload" class="sr-only">Upload image</label>
+          <div class="image-upload-area" id="drop-area" role="button" tabindex="0" aria-describedby="upload-hint">
+            <p>Click to upload or drag &amp; drop</p>
+            <input type="file" id="image-upload" name="image" accept="image/*">
+          </div>
+          <p id="upload-hint" class="hint">Supported: JPG, PNG, WEBP. Max 10&nbsp;MB.</p>
+        </div>
+
+        <div class="field">
+          <label for="image-edits">Describe desired edits</label>
+          <textarea id="image-edits" name="edits" rows="3" placeholder="e.g., Dreamy soft light, cyberpunk vibe, neon accents"></textarea>
+          <p class="hint">Be specific about mood, color, style (e.g., “film grain, teal/orange grade”).</p>
+        </div>
+      </div>
+
+      <!-- Platform + Language -->
+      <div class="field field-grid-2">
+        <div>
+          <label for="platform">Platform</label>
+          <select id="platform" name="platform" required>
+            <option value="instagram" selected>Instagram</option>
+            <option value="x">X (Twitter)</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="facebook">Facebook</option>
+            <option value="tiktok">TikTok</option>
+            <option value="youtube">YouTube Shorts</option>
+            <option value="pinterest">Pinterest</option>
+            <option value="threads">Threads</option>
+            <option value="reddit">Reddit</option>
+          </select>
+        </div>
+        <div>
+          <label for="language-input">Language</label>
+          <input type="text" id="language-input" name="language" value="English" placeholder="e.g., Hindi, French" required />
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="actions">
+        <button type="submit" class="button button--primary" id="pay-generate-btn">
+          Pay &amp; Generate
+        </button>
+      </div>
+    </form>
+
+    <!-- Loading -->
+    <section id="loading-spinner" class="card hidden" role="status" aria-live="polite" aria-busy="true">
+      <p>🤖 Our AI is working its magic... please wait.</p>
+    </section>
+
+    <!-- Results -->
+    <section id="results" class="card hidden" aria-labelledby="results-title">
+      <div class="card__header">
+        <h2 id="results-title">Your Results</h2>
+        <div class="right-actions">
+          <button type="button" id="copy-all" class="button button--ghost hidden">Copy all</button>
+        </div>
+      </div>
+      <div id="results-content" aria-live="polite" aria-atomic="false"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="container">
+      <p>&copy; <span id="year"></span> CaptionAI</p>
+    </div>
+  </footer>
+
+  <noscript>
+    <div class="container">
+      <p>Please enable JavaScript to use CaptionAI.</p>
+    </div>
+  </noscript>
+
+  <script>
+    // Auto-update year in footer
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    // ---------- App Script (inline) ----------
+    (function () {
+      // Keep these aligned with your backend _platform_style max_len
+      const PLATFORM_LIMITS = {
+        instagram: 150,
+        x: 280,
+        linkedin: 300,
+        facebook: 220,
+        tiktok: 150,
+        youtube: 150,
+        pinterest: 200,
+        threads: 280,
+        reddit: 300
+      };
+
+      const TIER_AMOUNTS = { caption: 5, image: 10 }; // rupees
+
+      const $form = document.getElementById('unified-form');
+      const $tierButtons = document.querySelectorAll('.tier-button');
+      const $selectedTier = document.getElementById('selected-tier');
+      const $priceBadge = document.getElementById('price-badge');
+      const $imageFields = document.getElementById('image-fields');
+      const $imageInput = document.getElementById('image-upload');
+      const $dropArea = document.getElementById('drop-area');
+      const $desc = document.getElementById('post-description');
+      const $descCounter = document.getElementById('desc-counter');
+      const $edits = document.getElementById('image-edits');
+      const $platform = document.getElementById('platform');
+      const $language = document.getElementById('language-input');
+      const $loading = document.getElementById('loading-spinner');
+      const $results = document.getElementById('results');
+      const $resultsContent = document.getElementById('results-content');
+      const $copyAll = document.getElementById('copy-all');
+      const $payBtn = document.getElementById('pay-generate-btn');
+
+      let razorpayKeyId = null;
+
+      // Helpers
+      function limitForSelectedPlatform() {
+        return PLATFORM_LIMITS[$platform.value] ?? 150;
+      }
+      function updateCounter() {
+        const limit = limitForSelectedPlatform();
+        const len = ($desc.value || '').length;
+        $descCounter.textContent = `${len} / ${limit}`;
+        $descCounter.classList.toggle('over', len > limit);
+      }
+      function updatePriceBadge(tier) {
+        const rupees = TIER_AMOUNTS[tier] || 5;
+        if ($priceBadge) $priceBadge.textContent = `₹${rupees}`;
+      }
+      function showLoading(show) { $loading.classList.toggle('hidden', !show); }
+      function escapeHtml(s) {
+        return (s || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      }
+      function escapeAttr(s) { return (s || '').replaceAll('"', '&quot;'); }
+
+      // Tier toggle UI
+      $tierButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          $tierButtons.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+          btn.classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+
+          const tier = btn.dataset.tier;
+          $selectedTier.value = tier;
+          updatePriceBadge(tier);
+
+          if (tier === 'image') {
+            $imageFields.classList.remove('hidden');
+          } else {
+            $imageFields.classList.add('hidden');
+            $imageInput.value = '';
+            $edits.value = '';
+          }
+        });
+      });
+
+      // Drag & drop for image
+      ['dragenter','dragover'].forEach(ev => {
+        $dropArea.addEventListener(ev, e => {
+          e.preventDefault(); e.stopPropagation();
+          $dropArea.classList.add('drag-over');
+        });
+      });
+      ['dragleave','drop'].forEach(ev => {
+        $dropArea.addEventListener(ev, e => {
+          e.preventDefault(); e.stopPropagation();
+          $dropArea.classList.remove('drag-over');
+        });
+      });
+      $dropArea.addEventListener('drop', (e) => {
+        const files = e.dataTransfer.files;
+        if (files && files[0]) $imageInput.files = files;
+      });
+
+      // Character counter and platform change
+      $desc.addEventListener('input', updateCounter);
+      $platform.addEventListener('change', updateCounter);
+      updateCounter();
+
+      // Fetch Razorpay key id
+      async function getConfig() {
+        const res = await fetch('/config');
+        if (!res.ok) throw new Error('Failed to load config');
+        const data = await res.json();
+        razorpayKeyId = data.razorpay_key_id;
+      }
+
+      // Create order on server
+      async function createOrder(amountInINR) {
+        const res = await fetch('/create-order', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ amount: amountInINR })
+        });
+        if (!res.ok) throw new Error('Order creation failed');
+        return res.json();
+      }
+
+      // Verify payment on server
+      async function verifyPayment(payload) {
+        const res = await fetch('/verify-payment', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Payment verification failed');
+        return res.json();
+      }
+
+      // Call /generate-content (JSON for caption-only, multipart for image tier)
+      async function generateContent(tier) {
+        if (tier === 'image') {
+          const fd = new FormData();
+          const file = $imageInput.files && $imageInput.files[0];
+          if (!file) throw new Error('Please upload an image for edits.');
+          if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.type)) throw new Error('Please upload a JPG, PNG, or WEBP image.');
+          if (file.size > 10 * 1024 * 1024) throw new Error('Max 10MB image size exceeded.');
+
+          fd.append('image', file);
+          fd.append('description', $desc.value.trim());
+          fd.append('edits', ($edits.value || '').trim());
+          fd.append('platform', $platform.value);
+          fd.append('language', $language.value.trim() || 'English');
+
+          const res = await fetch('/generate-content', { method: 'POST', body: fd });
+          if (!res.ok) throw new Error('Generation failed');
+          return res.json();
+        } else {
+          const payload = {
+            description: $desc.value.trim(),
+            platform: $platform.value,
+            language: $language.value.trim() || 'English'
+          };
+          const res = await fetch('/generate-content', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) throw new Error('Generation failed');
+          return res.json();
+        }
+      }
+
+      // Render results
+      function renderResults(data) {
+        $results.classList.remove('hidden');
+        const captions = Array.isArray(data.captions) ? data.captions.filter(Boolean) : [];
+        const images = Array.isArray(data.images) ? data.images.filter(Boolean) : [];
+        const notice = data.notice;
+
+        let html = '';
+
+        if (captions.length) {
+          html += '<div class="captions"><h3>Captions</h3><ol>';
+          captions.forEach(c => {
+            html += `<li><span class="caption-text">${escapeHtml(c)}</span>
+              <button type="button" class="copy-btn" data-copy="${escapeAttr(c)}" aria-label="Copy caption">Copy</button></li>`;
+          });
+          html += '</ol></div>';
+        }
+
+        if (images.length) {
+          html += '<div class="images"><h3>Edited Images</h3><div class="image-grid">';
+          images.forEach(u => {
+            html += `<figure class="image-item">
+              <img src="${escapeAttr(u)}" alt="AI-edited result" loading="lazy">
+              <figcaption><a href="${escapeAttr(u)}" target="_blank" rel="noopener">Open</a></figcaption>
+            </figure>`;
+          });
+          html += '</div></div>';
+        }
+
+        if (!captions.length && !images.length) {
+          html += '<p>No results returned. Try a clearer description or different edits.</p>';
+        }
+
+        if (notice) {
+          html += `<p class="fineprint">${escapeHtml(notice)}</p>`;
+        }
+
+        $resultsContent.innerHTML = html;
+
+        // Copy buttons
+        const items = $resultsContent.querySelectorAll('.copy-btn');
+        items.forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const text = btn.getAttribute('data-copy') || '';
+            try {
+              await navigator.clipboard.writeText(text);
+              btn.textContent = 'Copied!';
+              setTimeout(() => (btn.textContent = 'Copy'), 1200);
+            } catch {
+              btn.textContent = 'Copy failed';
+              setTimeout(() => (btn.textContent = 'Copy'), 1200);
+            }
+          });
+        });
+
+        // Copy all
+        if (captions.length) {
+          $copyAll.classList.remove('hidden');
+          $copyAll.onclick = async () => {
+            try {
+              await navigator.clipboard.writeText(captions.join('\n'));
+              $copyAll.textContent = 'Copied!';
+              setTimeout(() => ($copyAll.textContent = 'Copy all'), 1200);
+            } catch {
+              $copyAll.textContent = 'Copy failed';
+              setTimeout(() => ($copyAll.textContent = 'Copy all'), 1200);
+            }
+          };
+        } else {
+          $copyAll.classList.add('hidden');
+        }
+      }
+
+      // Submit flow
+      $form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const tier = $selectedTier.value; // "caption" | "image"
+        const limit = limitForSelectedPlatform();
+        const len = ($desc.value || '').trim().length;
+
+        if (!len) return alert('Please add a description.');
+        if (len > limit) return alert(`Please keep the description ≤ ${limit} characters for this platform.`);
+
+        if (tier === 'image') {
+          if (!$imageInput.files || !$imageInput.files[0]) {
+            return alert('Please upload an image for the edits tier.');
+          }
+        }
+
+        try {
+          // lock the button to prevent double submits
+          $payBtn.disabled = true;
+          showLoading(true);
+          $results.classList.add('hidden');
+          $resultsContent.innerHTML = '';
+
+          // ensure we have the Razorpay key
+          if (!razorpayKeyId) await getConfig();
+
+          // create order
+          const amount = TIER_AMOUNTS[tier];
+          const order = await createOrder(amount);
+
+          // open Razorpay
+          await new Promise((resolve, reject) => {
+            const rzp = new window.Razorpay({
+              key: razorpayKeyId,
+              amount: order.amount,
+              currency: order.currency,
+              name: 'CaptionAI',
+              description: tier === 'image' ? 'Captions + Image Edits' : 'Captions Only',
+              order_id: order.id,
+              handler: async function (response) {
+                try {
+                  const verifyRes = await verifyPayment({
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_signature: response.razorpay_signature
+                  });
+                  if (verifyRes.status !== 'ok') return reject(new Error('Payment verification failed'));
+                  resolve();
+                } catch (err) { reject(err); }
+              },
+              modal: { ondismiss: () => reject(new Error('Payment cancelled')) },
+              theme: { color: '#007bff' }
+            });
+            rzp.open();
+          });
+
+          // generate after successful verification
+          const result = await generateContent(tier);
+          renderResults(result);
+        } catch (err) {
+          console.error(err);
+          alert(err.message || 'Something went wrong. Please try again.');
+        } finally {
+          showLoading(false);
+          $payBtn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,333 @@
+/* Import font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+
+/* =======================
+   Design Tokens
+======================= */
+:root{
+  --bg-color:#121212;
+  --card-color:#1e1e1e;
+  --elevated-color:#232323;
+  --primary-color:#007bff;
+  --primary-hover-color:#0056b3;
+  --text-color:#e8e8e8;
+  --muted-text:#b8b8b8;
+  --border-color:#2b2b2b;
+  --success:#19c37d;
+  --danger:#ff4d4f;
+  --focus-ring:0 0 0 3px rgba(0,123,255,.35);
+  --radius:12px;
+  --radius-sm:8px;
+  --shadow-1:0 6px 20px rgba(0,0,0,.35);
+  --shadow-2:0 10px 30px rgba(0,0,0,.45);
+  --font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  --container:720px;
+
+  /* Background image (replace with your file/url) */
+  --bg-image:url('/path/to/your-background.jpg');
+  --bg-overlay:rgba(0,0,0,.55);
+}
+
+/* =======================
+   Base / Reset
+======================= */
+*{box-sizing:border-box}
+html,body{height:100%}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--font-family);
+  color:var(--text-color);
+  min-height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:1.5rem 1rem 2.25rem;
+  line-height:1.55;
+  background:var(--bg-color);
+  position:relative;
+  overflow-x:hidden;
+}
+
+/* Background image + overlay */
+.background{
+  position:fixed; inset:0; z-index:-2;
+  background:
+    linear-gradient(var(--bg-overlay),var(--bg-overlay)),
+    var(--bg-image) no-repeat center center / cover;
+  will-change:transform;
+  transform:translateZ(0);
+}
+
+/* Subtle ambient gradients */
+body::after{
+  content:"";
+  position:fixed; inset:0; z-index:-1;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(0,123,255,.12), transparent 50%),
+    radial-gradient(800px 400px at 90% 10%, rgba(0,123,255,.08), transparent 50%);
+  pointer-events:none;
+}
+
+/* Respect reduced motion */
+*,*:before,*:after{transition:background-color .2s ease,border-color .2s ease,color .2s ease,box-shadow .2s ease,transform .12s ease}
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{transition:none!important;animation:none!important}
+}
+
+/* Layout shells */
+header,main,footer{width:100%;max-width:var(--container)}
+header{text-align:center;margin-bottom:.25rem}
+main{display:flex;flex-direction:column;gap:1rem}
+footer{padding:1.25rem 0 0;opacity:.7;text-align:center;font-size:.95rem}
+
+/* Utilities */
+.hidden{display:none!important}
+.container{width:100%;max-width:var(--container);margin:0 auto}
+.sr-only{
+  position:absolute!important;width:1px!important;height:1px!important;
+  padding:0!important;margin:-1px!important;overflow:hidden!important;
+  clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;
+}
+.skip-link{
+  position:absolute;left:50%;transform:translate(-50%,-120%);
+  background:var(--primary-color);color:#fff;padding:.5rem .75rem;border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-1);text-decoration:none;z-index:1000
+}
+.skip-link:focus{transform:translate(-50%, .5rem);outline:none;box-shadow:var(--shadow-2)}
+
+/* =======================
+   Card
+======================= */
+.card{
+  background:linear-gradient(180deg,var(--card-color),var(--elevated-color));
+  border:1px solid var(--border-color);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-1);
+  padding:1.1rem; /* compact */
+  backdrop-filter:saturate(120%) blur(2px);
+}
+.card__header{margin-bottom:.65rem}
+
+/* =======================
+   Typography
+======================= */
+h1{
+  font-size:clamp(1.9rem,1.3rem + 2.2vw,2.5rem);
+  letter-spacing:.2px;margin-bottom:.25rem
+}
+.tagline{color:var(--muted-text)}
+h2{font-size:1.25rem;margin-bottom:.15rem;text-align:center}
+h3{font-size:1.05rem;margin-bottom:.25rem;color:var(--muted-text);font-weight:600}
+p.hint,.fineprint{color:var(--muted-text);font-size:.95rem;margin-top:.25rem}
+
+/* =======================
+   Form
+======================= */
+form{display:grid;gap:.85rem}
+.field{display:grid;gap:.45rem}
+label{font-size:.95rem;color:var(--text-color);opacity:.95}
+
+textarea,select,input[type="text"]{
+  width:100%;
+  padding:.75rem .9rem;
+  background:#232323;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-sm);
+  color:var(--text-color);
+  font:inherit;font-size:1rem;
+}
+textarea{resize:vertical;min-height:96px}
+textarea::placeholder,input::placeholder{color:#9a9a9a;opacity:.85}
+
+textarea:focus,select:focus,input[type="text"]:focus{
+  outline:none;border-color:var(--primary-color);box-shadow:var(--focus-ring)
+}
+
+/* Two-up row for Platform + Language */
+.field-grid-2{
+  display:grid;gap:.75rem;
+  grid-template-columns:1fr 1fr;
+}
+
+/* =======================
+   Buttons
+======================= */
+button,.button{
+  display:inline-flex;justify-content:center;align-items:center;gap:.5rem;
+  width:100%;padding:.8rem 1rem;border:none;border-radius:var(--radius-sm);
+  font-size:1rem;font-weight:600;cursor:pointer;text-align:center;
+  background:#2e2e2e;color:var(--text-color)
+}
+.button--primary, form button[type="submit"]{
+  background:linear-gradient(180deg,var(--primary-color),var(--primary-hover-color));color:#fff
+}
+button:hover{filter:brightness(1.03)}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+
+/* Tier buttons as tabs */
+.tier-buttons{
+  display:grid;grid-template-columns:1fr 1fr;gap:.5rem;
+  background:#191919;padding:.4rem;border-radius:calc(var(--radius) - 6px);
+  border:1px solid var(--border-color)
+}
+.tier-button{
+  background:#2a2a2a;color:var(--text-color);
+  border:1px solid var(--border-color);
+  padding:.65rem .9rem;border-radius:var(--radius-sm);font-weight:600
+}
+.tier-button:hover{background:#313131}
+.tier-button.active{
+  background:linear-gradient(180deg,var(--primary-color),var(--primary-hover-color));
+  color:#fff;border-color:transparent;box-shadow:inset 0 -2px 0 rgba(255,255,255,.12)
+}
+
+/* =======================
+   Upload (Dropzone)
+======================= */
+.image-upload-area{
+  border:2px dashed var(--border-color);
+  border-radius:var(--radius-sm);
+  padding:1.4rem;text-align:center;cursor:pointer;margin-bottom:.25rem;
+  position:relative;background:#1f1f1f;transition:border-color .15s ease, background .15s ease
+}
+.image-upload-area:hover{border-color:var(--primary-color);background:#222}
+.image-upload-area:focus,.image-upload-area:focus-within{
+  outline:none;border-color:var(--primary-color);box-shadow:var(--focus-ring)
+}
+.image-upload-area.dragover{border-color:var(--primary-color);background:#222}
+#image-upload{
+  opacity:0;position:absolute;inset:0;width:100%;height:100%;cursor:pointer
+}
+
+/* =======================
+   Loading & Results
+======================= */
+#loading-spinner p{text-align:center}
+#results-content{
+  white-space:pre-wrap;line-height:1.6;display:grid;gap:.8rem
+}
+
+/* Image grid for generated images */
+.image-results{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:.6rem
+}
+.image-results img{
+  width:100%;height:auto;display:block;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border-color);
+  background:#101010
+}
+
+/* Optional toast styles (hooks for JS if needed) */
+.toast{padding:.7rem .9rem;border-radius:var(--radius-sm);background:#262626;border:1px solid var(--border-color)}
+.toast--success{border-color:rgba(25,195,125,.5);box-shadow:0 0 0 2px rgba(25,195,125,.15) inset}
+.toast--error{border-color:rgba(255,77,79,.5);box-shadow:0 0 0 2px rgba(255,77,79,.15) inset}
+
+/* Links */
+a{color:var(--primary-color);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Focus visible default */
+:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+
+/* Scrollbar (nice-to-have) */
+@media (hover:hover){
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:#161616}
+  ::-webkit-scrollbar-thumb{background:#2c2c2c;border-radius:999px}
+  ::-webkit-scrollbar-thumb:hover{background:#3a3a3a}
+}
+
+/* =======================
+   Responsive
+======================= */
+@media (max-width:768px){
+  body{padding:1rem .75rem 1.5rem}
+  .card{padding:1rem}
+  .tier-buttons{grid-template-columns:1fr}
+  .image-results{grid-template-columns:1fr}
+  .field-grid-2{grid-template-columns:1fr}
+}
+
+/* Print */
+@media print{
+  .image-upload-area,.tier-buttons,button,.skip-link,.background{display:none!important}
+  body{background:#fff;color:#000}
+  .card{box-shadow:none;border-color:#ccc}
+}
+
+/* public/style.css -- Add these at the end */
+
+/* --- Results Styling --- */
+.caption-list {
+    list-style: none;
+    padding: 0;
+    margin-top: 1rem;
+}
+
+.caption-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #2a2a2a;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.copy-button {
+    width: auto; /* Override default button width */
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+    margin-left: 1rem;
+    background-color: #444;
+    color: var(--text-color);
+    flex-shrink: 0; /* Prevent button from shrinking */
+}
+
+.copy-button:hover {
+    background-color: #555;
+}
+
+.image-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.image-wrapper {
+    text-align: center;
+}
+
+.image-results img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.download-button {
+    display: inline-block;
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    background-color: var(--primary-color);
+    color: white;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: background-color 0.2s ease;
+}
+
+.download-button:hover {
+    background-color: var(--primary-hover-color);
+}
+
+.notice, .error {
+    background-color: #442c2c;
+    border: 1px solid #933;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
