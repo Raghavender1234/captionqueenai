@@ -1,0 +1,10 @@
+# requirements.txt
+
+Flask
+google-generativeai
+python-dotenv
+Pillow
+razorpay
+replicate
+requests
+gunicorn
