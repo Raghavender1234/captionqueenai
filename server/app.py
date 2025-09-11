@@ -7,7 +7,8 @@ import hashlib
 import io
 import pathlib
 import logging
-from typing import List, Optional
+import re
+from typing import List, Optional, Tuple
 
 import requests
 from flask import Flask, send_from_directory, request, jsonify
@@ -32,10 +33,10 @@ GOOGLE_API_KEY      = os.getenv("GOOGLE_API_KEY")
 RAZORPAY_KEY_ID     = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 
-# Prices (INR) — change here if you update plans later
+# Prices (INR)
 PRICE_INR = {
     "caption": 5,
-    "image": 10,   # ← updated photo tier price
+    "image": 10,  # photo + edits tier
 }
 
 # Replicate edit models (primary + fallback)
@@ -80,24 +81,22 @@ def get_config():
     })
 
 # ----------------------------
-# 4) Create order (now tier-aware & price-validated)
+# 4) Create order (tier-aware & price-validated)
 # ----------------------------
 @app.post('/create-order')
 def create_order():
     try:
         data = request.get_json(force=True, silent=True) or {}
 
-        # Optional 'tier' from client; if provided, we ENFORCE server price.
         tier = (data.get('tier') or '').strip().lower()
         client_amount = int(data.get('amount', 0) or 0)
 
         if tier in PRICE_INR:
-            amount_in_inr = PRICE_INR[tier]  # authoritative price
+            amount_in_inr = PRICE_INR[tier]
         else:
             # Backward-compat: allow amount-only calls if it matches a known price
             if client_amount in PRICE_INR.values():
                 amount_in_inr = client_amount
-                # try to deduce tier for notes
                 tier = next((k for k, v in PRICE_INR.items() if v == client_amount), "unknown")
             else:
                 return jsonify({"error": "Invalid tier/amount"}), 400
@@ -156,39 +155,46 @@ def generate_content():
     try:
         # ----- Image + edits (multipart/form-data) -----
         if 'image' in request.files:
-            image_file  = request.files['image']
-            description = (request.form.get('description') or '').strip()
-            edits       = (request.form.get('edits') or '').strip()
-            platform    = (request.form.get('platform') or 'instagram').strip()
-            language    = (request.form.get('language') or 'English').strip()
+            image_file   = request.files['image']
+            description  = (request.form.get('description') or '').strip()
+            edits        = (request.form.get('edits') or '').strip()
+            platform     = (request.form.get('platform') or 'instagram').strip()
+            language     = (request.form.get('language') or 'English').strip()
+            style_prompt = (request.form.get('style_prompt') or '').strip()
 
             if not image_file or image_file.filename == '':
                 return jsonify({"error": "Image is required"}), 400
 
-            # Validate image by decoding with PIL; also convert to RGB for safe downstream handling
+            # Validate image
             try:
                 pil = Image.open(image_file.stream).convert("RGB")
             except Exception:
                 return jsonify({"error": "Invalid image"}), 400
 
-            # Re-encode to JPEG bytes (downscaled) for captioning context only
+            # Re-encode to JPEG bytes for captioning context
             jpg_bytes = _downscale_to_jpeg_bytes(pil, max_side=1024, quality=85)
 
-            # Build prompt + call Gemini
-            caption_prompt = _build_caption_prompt(description, edits, platform, language, with_image=True)
+            caption_prompt = _build_caption_prompt(
+                description, edits, platform, language, style_prompt, with_image=True
+            )
+
             text_model = _get_model()
             try:
                 cap_resp = text_model.generate_content(
                     [caption_prompt, {"mime_type": "image/jpeg", "data": jpg_bytes}]
                 )
-                captions = _extract_bullets(cap_resp.text)
+                captions_raw = _extract_bullets(cap_resp.text)
             except ResourceExhausted:
-                # fall back to text-only if the multimodal call hits quota
-                fallback_prompt = _build_caption_prompt(description, edits, platform, language, with_image=False)
+                # Fallback: text-only if multimodal hits quota
+                fallback_prompt = _build_caption_prompt(
+                    description, edits, platform, language, style_prompt, with_image=False
+                )
                 cap_resp = text_model.generate_content(fallback_prompt)
-                captions = _extract_bullets(cap_resp.text)
+                captions_raw = _extract_bullets(cap_resp.text)
 
-            captions = _enforce_length_per_platform(captions, platform)
+            captions = _postprocess_captions(
+                captions_raw, platform, description, language
+            )
 
             # >>> AI IMAGE EDITS (Replicate) <<<
             images_urls: List[str] = []
@@ -196,7 +202,6 @@ def generate_content():
             if REPLICATE_API_TOKEN and replicate is not None:
                 try:
                     images_urls = _run_img_edit_with_replicate_from_pil(pil, edits or description)
-                    # Optional: re-host for longer-lived links
                     images_urls = [_persist_from_url(u) for u in images_urls]
                 except Exception:
                     app.logger.exception("Replicate edit failed")
@@ -211,20 +216,25 @@ def generate_content():
 
         # ----- Caption-only (application/json) -----
         else:
-            data        = request.get_json(force=True, silent=True) or {}
-            description = (data.get('description') or '').strip()
-            platform    = (data.get('platform') or 'instagram').strip()
-            language    = (data.get('language') or 'English').strip()
+            data         = request.get_json(force=True, silent=True) or {}
+            description  = (data.get('description') or '').strip()
+            platform     = (data.get('platform') or 'instagram').strip()
+            language     = (data.get('language') or 'English').strip()
+            style_prompt = (data.get('style_prompt') or '').strip()
 
             if not description:
                 return jsonify({"error": "Description is required"}), 400
 
-            prompt = _build_caption_prompt(description, edits="", platform=platform, language=language, with_image=False)
+            prompt = _build_caption_prompt(
+                description, "", platform, language, style_prompt, with_image=False
+            )
 
             model = _get_model()
             resp = model.generate_content(prompt)
-            captions = _extract_bullets(resp.text)
-            captions = _enforce_length_per_platform(captions, platform)
+            captions_raw = _extract_bullets(resp.text)
+            captions = _postprocess_captions(
+                captions_raw, platform, description, language
+            )
             return jsonify({"status": "success", "captions": captions, "images": []})
 
     except Exception:
@@ -235,6 +245,7 @@ def generate_content():
 # 7) Helpers
 # ----------------------------
 def _get_model():
+    """Try a few modern fast models, then fall back."""
     for mid in ('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-1.5-flash-latest'):
         try:
             logger.info(f"[GENAI] Using model: {mid}")
@@ -246,11 +257,19 @@ def _get_model():
 
 
 def _extract_bullets(text: str) -> List[str]:
+    """Extract up to 3 lines, stripping leading bullets/nums/quotes."""
     if not text:
         return []
-    lines = [ln.strip("•-* \t\r") for ln in str(text).strip().splitlines()]
-    lines = [ln for ln in lines if ln]
-    return lines[:3] or ["", "", ""]
+    lines = [ln.strip() for ln in str(text).strip().splitlines() if ln.strip()]
+    clean = []
+    for ln in lines:
+        ln = re.sub(r'^\s*[\d\.\)\-\*\•\>]+\s*', '', ln)  # strip common bullet markers
+        ln = ln.strip('“”"\' ')  # clean surrounding quotes
+        if ln:
+            clean.append(ln)
+        if len(clean) == 3:
+            break
+    return clean
 
 
 def _downscale_to_jpeg_bytes(pil_img: Image.Image, max_side: int = 1024, quality: int = 85) -> bytes:
@@ -263,151 +282,259 @@ def _downscale_to_jpeg_bytes(pil_img: Image.Image, max_side: int = 1024, quality
     img.save(buf, format="JPEG", quality=quality, optimize=True)
     return buf.getvalue()
 
-
 # ---------- Platform style presets ----------
 def _platform_style(platform: str):
     p = (platform or '').strip().lower()
 
+    # Sensible short-form defaults to keep captions scannable
     base = {
         "name": platform or "Instagram",
-        "max_len": 150,
+        "max_len": 220,  # short, high-retention captions by default
         "bullets": 3,
-        "tone": "modern, concise, value-first",
+        "tone": "conversational, specific, benefit-led",
+        "emoji_rule": "0–2 relevant emojis; never spam.",
+        "hashtag_rule": "0–3 niche, descriptive hashtags only.",
+        "cta_rule": "Soft, value-focused CTA.",
         "rules": [
-            "Front-load a hook within ~6 words.",
-            "Specific > vague; concrete verbs.",
-            "Avoid clickbait and generic hashtags.",
-            "At least one caption should contain a question."
+            "Hook in the first ~6 words.",
+            "Specific > vague; concrete nouns/verbs.",
+            "Avoid clickbait, clichés, and generic hashtags.",
+            "At least one caption must include a question."
         ],
-        "emoji_rule": "Use emojis sparingly.",
-        "hashtag_rule": "Only niche, relevant tags.",
-        "cta_rule": "Soft CTA (save/share/comment)."
     }
 
     presets = {
-        "instagram": dict(base, name="Instagram", max_len=150, tone="trendy, playful, high-energy, Gen Z voice",
-                          rules=[
-                              "Hook in first ~6 words.",
-                              "Use 1–3 relevant emojis; no spam.",
-                              "Use 0–3 niche hashtags; avoid generic tags.",
-                              "At least one caption should include a question."
-                          ],
-                          emoji_rule="1–3 emojis", hashtag_rule="0–3 niche tags", cta_rule="Soft CTA"),
-        "x": dict(base, name="Twitter", max_len=280, tone="witty, sharp, to-the-point",
-                  rules=[
-                      "Clarity and punch over fluff.",
-                      "Use at most 1 emoji; at most 2 hashtags.",
-                      "Keep it skimmable; one idea.",
-                      "Include a question."
-                  ],
-                  emoji_rule="≤1 emoji", hashtag_rule="≤2 if useful", cta_rule="Implicit CTA"),
+        "instagram": dict(base, name="Instagram", max_len=220, tone="engaging, sensory, authentic"),
+        "x": dict(base, name="X (Twitter)", max_len=280, tone="witty, sharp, to-the-point",
+                  emoji_rule="≤1 emoji", hashtag_rule="≤2 if truly useful"),
         "linkedin": dict(base, name="LinkedIn", max_len=300, tone="professional, insightful, credible",
-                         rules=[
-                             "Lead with a concrete insight.",
-                             "No slang; plain English.",
-                             "0–2 industry hashtags only.",
-                             "Invite discussion with a thoughtful question (exactly one caption)."
-                         ],
-                         emoji_rule="optional ≤1", hashtag_rule="0–2 industry tags", cta_rule="Invite discussion"),
-        "facebook": dict(base, name="Facebook", max_len=220, tone="friendly, community-oriented",
-                         rules=[
-                             "Lead with clear benefit/emotion.",
-                             "0–2 tasteful emojis.",
-                             "0–2 relevant hashtags.",
-                             "Include a question to invite comments."
-                         ],
-                         emoji_rule="0–2", hashtag_rule="0–2 relevant", cta_rule="Comment/share prompt"),
-        "tiktok": dict(base, name="TikTok", max_len=150, tone="fun, casual, high-energy",
-                       rules=[
-                           "Hook in the first 5 words.",
-                           "Use 1–3 emojis.",
-                           "Use 1–3 discovery hashtags.",
-                           "Include a question."
-                       ],
-                       emoji_rule="1–3", hashtag_rule="1–3 discovery tags", cta_rule="Watch/try/comment"),
-        "youtube": dict(base, name="YouTube Shorts", max_len=150, tone="clear, curiosity-driven",
-                        rules=[
-                            "Front-load the hook.",
-                            "≤2 emojis; 0–2 topic hashtags.",
-                            "Include a question."
-                        ],
-                        emoji_rule="≤2", hashtag_rule="0–2 topic tags", cta_rule="Watch/save"),
-        "pinterest": dict(base, name="Pinterest", max_len=200, tone="helpful, aspirational, how-to",
-                          rules=[
-                              "Lead with outcome or transformation.",
-                              "≤2 emojis.",
-                              "1–3 keyworded hashtags.",
-                              "Question optional."
-                          ],
-                          emoji_rule="≤2", hashtag_rule="1–3 keyworded", cta_rule="Save/try it"),
-        "threads": dict(base, name="Threads", max_len=280, tone="chill, conversational, witty",
-                        rules=[
-                            "Sound like a human, not a brand.",
-                            "≤2 emojis; hashtags optional (≤2).",
-                            "Include a question."
-                        ],
-                        emoji_rule="≤2", hashtag_rule="≤2 optional", cta_rule="Light conversational prompt"),
+                         emoji_rule="optional ≤1", hashtag_rule="0–2 industry tags",
+                         cta_rule="Invite discussion with a question."),
+        "facebook": dict(base, name="Facebook", max_len=300, tone="friendly, community-first"),
+        "tiktok": dict(base, name="TikTok", max_len=150, tone="fun, punchy, high-energy"),
+        "youtube": dict(base, name="YouTube Shorts", max_len=120, tone="clear, curiosity-driven"),
+        "pinterest": dict(base, name="Pinterest", max_len=200, tone="helpful, aspirational, how-to"),
+        "threads": dict(base, name="Threads", max_len=280, tone="chill, conversational, witty"),
         "reddit": dict(base, name="Reddit", max_len=300, tone="useful, specific, non-promotional",
-                       rules=[
-                           "Lead with the concrete takeaway.",
-                           "No hashtags. Emojis only if subreddit culture allows.",
-                           "Invite experiences/opinions."
-                       ],
                        emoji_rule="avoid", hashtag_rule="none", cta_rule="Ask for experiences"),
     }
 
-    aliases = { "ig": "instagram", "twitter": "x", "li": "linkedin",
-                "fb": "facebook", "youtube shorts": "youtube", "shorts": "youtube" }
+    aliases = {
+        "ig": "instagram", "twitter": "x", "li": "linkedin",
+        "fb": "facebook", "youtube shorts": "youtube", "shorts": "youtube"
+    }
 
     key = aliases.get(p, p)
     return presets.get(key) or base
 
+
 # ---------- Prompt builder ----------
-def _build_caption_prompt(description: str, edits: str, platform: str, language: str, with_image: bool):
+def _build_caption_prompt(
+    description: str,
+    edits: str,
+    platform: str,
+    language: str,
+    style_prompt: str,
+    with_image: bool
+):
     st = _platform_style(platform)
-    context_line = "You are viewing an image." if with_image else "You are writing without seeing the image."
+    context_line = (
+        "The user has provided an image for context."
+        if with_image else
+        "No image provided; rely on the description."
+    )
+
+    # Clear, testable instructions; forces diversity and compliance
     return f"""
-You are a senior social media strategist. {context_line}
-Generate exactly {st['bullets']} caption options in {language} for {st['name']}.
-Audience: platform-native users who expect {st['tone']}.
+You are CaptionCraft AI, an elite social media strategist and copywriter.
 
-Post context (from user): "{description}"
-If relevant, image edits or visual notes: "{edits}"
+CONTEXT: {context_line}
+PLATFORM: {st['name']}
+LANGUAGE: {language}
 
-Platform rules:
-- Voice/Tone: {st['tone']}
-- Hard length limit: {st['max_len']} characters total per caption.
-- Emojis: {st.get('emoji_rule','Use emojis sparingly.')}
-- Hashtags: {st.get('hashtag_rule','Only niche, relevant tags.')}
-- Calls to action: {st.get('cta_rule','Soft CTA (save/share/comment).')}
-- Banned: clickbait cliches, spammy tags, culture-insensitive phrasing.
+USER INPUT:
+- Core description: "{description}"
+- Visual notes/edits (if any): "{edits or ''}"
+- Style directive (if any): "{style_prompt or ''}"
 
-Formatting:
-- Return ONLY {st['bullets']} lines. One caption per line. No numbering, no quotes.
-- Each line must be <= {st['max_len']} chars (strict).
-- At least one caption should include a question.
+REQUIREMENTS:
+- Generate EXACTLY {st['bullets']} distinct caption options.
+- Each caption MUST be under {st['max_len']} characters (strict).
+- Tone: {st['tone']}.
+- Emojis: {st['emoji_rule']}.
+- Hashtags: {st['hashtag_rule']}.
+- CTA: {st['cta_rule']}.
+- Additional rules:
+  - {st['rules'][0]}
+  - {st['rules'][1]}
+  - {st['rules'][2]}
+  - {st['rules'][3]}
 
-Quality checklist (follow silently):
-- Front-load a hook in the first ~6 words.
-- Specific > vague; benefits > features; concrete nouns/verbs.
-- Natural rhythm: short clauses, varied sentence length.
+DIVERSITY:
+- Provide 3 different styles:
+  1) Direct & value-first.
+  2) Creative/emotional with vivid detail.
+  3) Conversational and includes an engaging question.
 
-Output: the {st['bullets']} captions.
+FORMAT:
+- Return ONLY the {st['bullets']} final captions.
+- One caption per line.
+- No numbering, bullets, labels, or commentary.
 """.strip()
 
 
-def _enforce_length_per_platform(captions: List[str], platform: str) -> List[str]:
+# ---------- Post-processing & utilities ----------
+def _postprocess_captions(
+    captions_raw: List[str],
+    platform: str,
+    description: str,
+    language: str
+) -> List[str]:
+    """Trim, dedupe, ensure one question, and optionally add smart hashtags within limit."""
     st = _platform_style(platform)
     max_len = st["max_len"]
-    clean = []
-    for c in (captions or [])[:3]:
-        c = (c or "").strip()
-        if len(c) > max_len:
-            c = c[:max_len].rstrip()
-        clean.append(c)
-    while len(clean) < 3:
-        clean.append("")
-    return clean[:3]
+
+    # Clean empty lines
+    captions = [c.strip() for c in (captions_raw or []) if c and c.strip()]
+
+    # Ensure up to 3 candidates
+    captions = captions[:3]
+    if not captions:
+        captions = _fallback_captions(description, platform, language)
+
+    # Deduplicate (case-insensitive)
+    captions = _dedupe(captions)
+
+    # Ensure at least one caption ends with a question if required
+    captions = _ensure_question(captions, description, language)
+
+    # Optionally compose 0–3 niche hashtags from description keywords
+    hashtags = _compose_hashtags(description, platform, max_tags=3)
+    processed = []
+    for i, c in enumerate(captions):
+        # For variety, add hashtags only to one caption (typically the first),
+        # and only if platform allows hashtags
+        with_tags = c
+        if i == 0 and hashtags and _platform_allows_hashtags(platform):
+            trial = f"{c} {' '.join(hashtags)}".strip()
+            with_tags = _trim_to_limit(trial, max_len)
+        else:
+            with_tags = _trim_to_limit(c, max_len)
+
+        processed.append(with_tags)
+
+    # Final safety: enforce length again and re-dedupe
+    processed = [_trim_to_limit(x, max_len) for x in processed]
+    processed = _dedupe(processed)
+
+    # Guarantee exactly 3 lines (pad with short variants if needed)
+    while len(processed) < 3:
+        filler = _trim_to_limit(_quick_variant(description, platform, language), max_len)
+        if filler not in processed:
+            processed.append(filler)
+        else:
+            processed.append(_trim_to_limit(f"{description[: max(10, len(description)//2)]}?", max_len))
+
+    return processed[:3]
+
+
+def _platform_allows_hashtags(platform: str) -> bool:
+    key = (platform or "").strip().lower()
+    if key in {"reddit"}:
+        return False
+    return True
+
+
+def _trim_to_limit(text: str, max_len: int) -> str:
+    """Trim on word boundary; add ellipsis if truncated in the middle of a word."""
+    text = (text or "").strip()
+    if len(text) <= max_len:
+        return text
+    # Try last space within limit
+    cut = text.rfind(" ", 0, max_len)
+    if cut != -1 and cut >= max_len - 30:
+        return text[:cut].rstrip() + "…"
+    # Hard cut with ellipsis
+    if max_len >= 1:
+        return text[: max_len - 1].rstrip() + "…"
+    return ""
+
+
+def _dedupe(lines: List[str]) -> List[str]:
+    seen = set()
+    out = []
+    for ln in lines:
+        key = ln.lower().strip()
+        if key and key not in seen:
+            out.append(ln)
+            seen.add(key)
+    return out
+
+
+def _ensure_question(captions: List[str], description: str, language: str) -> List[str]:
+    if any(c.strip().endswith("?") or "?" in c for c in captions):
+        return captions
+    # Add a conversational question to the last caption
+    question = _question_for(description, language)
+    if captions:
+        base = captions[-1].rstrip("?.! ")
+        captions[-1] = f"{base}? {question}".strip()
+        return captions
+    return [f"{_quick_variant(description, 'instagram', language)} {question}".strip()]
+
+
+def _question_for(description: str, language: str) -> str:
+    # Simple multilingual-friendly question add-on (kept short)
+    if (language or "").lower().startswith("hi"):
+        return "आप क्या सोचते हैं?"
+    if (language or "").lower().startswith("te"):
+        return "మీ అభిప్రాయం ఏమిటి?"
+    if (language or "").lower().startswith("es"):
+        return "¿Qué opinas?"
+    return "What do you think?"
+
+
+def _compose_hashtags(description: str, platform: str, max_tags: int = 3) -> List[str]:
+    """Create 0–3 niche, descriptive hashtags from description keywords."""
+    if not _platform_allows_hashtags(platform):
+        return []
+    # Extract simple keywords
+    words = re.findall(r"[A-Za-z0-9]+", description.lower())
+    # Filter generic stopwords
+    stops = {"the","a","an","and","or","to","of","in","on","for","with","this","that","is","are","it","at","by","be"}
+    kws = [w for w in words if w not in stops and len(w) > 2]
+    # Keep unique order
+    seen = set()
+    kws_unique = []
+    for w in kws:
+        if w not in seen:
+            kws_unique.append(w); seen.add(w)
+        if len(kws_unique) >= 6:
+            break
+    hashtags = [f"#{re.sub(r'[^A-Za-z0-9]', '', w)}" for w in kws_unique[:max_tags]]
+    # Avoid empty or numeric-only tags
+    hashtags = [ht for ht in hashtags if re.search(r"[A-Za-z]", ht)]
+    return hashtags[:max_tags]
+
+
+def _quick_variant(description: str, platform: str, language: str) -> str:
+    # Tiny heuristic alternative if model returns too few lines
+    base = description.strip() or "Making something awesome"
+    hooks = [
+        "Quick tip:", "Behind the shot:", "Real talk:", "Pro move:",
+        "Did you know?", "Try this next:", "Hot take:"
+    ]
+    hook = hooks[hash(base) % len(hooks)]
+    return f"{hook} {base}"
+
+
+def _fallback_captions(description: str, platform: str, language: str) -> List[str]:
+    # Graceful fallback; short, safe, varied
+    v1 = f"{description[:80].strip()} — save this for later!"
+    v2 = f"From idea to reality: {description[:70].strip()}"
+    v3 = f"{description[:60].strip()} — thoughts?"
+    return [v1, v2, v3]
+
 
 # ---------- Replicate helpers ----------
 def _persist_bytes_to_temp(b: bytes) -> str:
@@ -527,6 +654,7 @@ def _persist_from_url(url: str) -> str:
     except Exception:
         app.logger.exception(f"Failed to re-upload image from URL {url}")
         return url
+
 
 # ----------------------------
 # 8) Entry

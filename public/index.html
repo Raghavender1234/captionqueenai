@@ -75,7 +75,13 @@
         <div class="field">
           <label for="image-upload" class="sr-only">Upload image</label>
           <div class="image-upload-area" id="drop-area" role="button" tabindex="0" aria-describedby="upload-hint">
-            <p>Click to upload or drag &amp; drop</p>
+            <div id="upload-placeholder">
+              <p>Click to upload or drag &amp; drop</p>
+            </div>
+            <div id="image-preview" class="hidden">
+              <img id="preview-img" src="" alt="Uploaded image preview">
+              <button type="button" id="remove-image" class="remove-btn" aria-label="Remove image">×</button>
+            </div>
             <input type="file" id="image-upload" name="image" accept="image/*">
           </div>
           <p id="upload-hint" class="hint">Supported: JPG, PNG, WEBP. Max 10&nbsp;MB.</p>
@@ -84,7 +90,7 @@
         <div class="field">
           <label for="image-edits">Describe desired edits</label>
           <textarea id="image-edits" name="edits" rows="3" placeholder="e.g., Dreamy soft light, cyberpunk vibe, neon accents"></textarea>
-          <p class="hint">Be specific about mood, color, style (e.g., “film grain, teal/orange grade”).</p>
+          <p class="hint">Be specific about mood, color, style (e.g., "film grain, teal/orange grade").</p>
         </div>
       </div>
 
@@ -115,6 +121,11 @@
         <button type="submit" class="button button--primary" id="pay-generate-btn">
           Pay &amp; Generate
         </button>
+      </div>
+
+      <!-- Privacy Notice -->
+      <div class="privacy-notice">
+        <p class="fineprint"><strong>Privacy:</strong> No photos are saved on our servers. Images are processed temporarily and immediately deleted. Please don't upload inappropriate content or use this service for deceptive purposes.</p>
       </div>
     </form>
 
@@ -175,12 +186,16 @@
       const $imageFields = document.getElementById('image-fields');
       const $imageInput = document.getElementById('image-upload');
       const $dropArea = document.getElementById('drop-area');
+      const $uploadPlaceholder = document.getElementById('upload-placeholder');
+      const $imagePreview = document.getElementById('image-preview');
+      const $previewImg = document.getElementById('preview-img');
+      const $removeImage = document.getElementById('remove-image');
       const $desc = document.getElementById('post-description');
       const $descCounter = document.getElementById('desc-counter');
       const $edits = document.getElementById('image-edits');
       const $platform = document.getElementById('platform');
       const $language = document.getElementById('language-input');
-      const $loading = document.getElementById('loading-spinner');
+      const $loading = document.getElementById('loading-spinner'); // <-- this is the spinner card
       const $results = document.getElementById('results');
       const $resultsContent = document.getElementById('results-content');
       const $copyAll = document.getElementById('copy-all');
@@ -202,11 +217,47 @@
         const rupees = TIER_AMOUNTS[tier] || 5;
         if ($priceBadge) $priceBadge.textContent = `₹${rupees}`;
       }
-      function showLoading(show) { $loading.classList.toggle('hidden', !show); }
+      // ✅ FIXED: toggle the existing #loading-spinner (no undefined $loadingOverlay)
+      function showLoading(show) {
+        $loading.classList.toggle('hidden', !show);
+        document.body.style.overflow = show ? 'hidden' : '';
+      }
       function escapeHtml(s) {
         return (s || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
       }
       function escapeAttr(s) { return (s || '').replaceAll('"', '&quot;'); }
+
+      // Image preview functions
+      function showImagePreview(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          $previewImg.src = e.target.result;
+          $uploadPlaceholder.classList.add('hidden');
+          $imagePreview.classList.remove('hidden');
+        };
+        reader.readAsDataURL(file);
+      }
+
+      function hideImagePreview() {
+        $uploadPlaceholder.classList.remove('hidden');
+        $imagePreview.classList.add('hidden');
+        $previewImg.src = '';
+        $imageInput.value = '';
+      }
+
+      // Image upload handling
+      $imageInput.addEventListener('change', function() {
+        const file = this.files[0];
+        if (file) {
+          showImagePreview(file);
+        }
+      });
+
+      $removeImage.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideImagePreview();
+      });
 
       // Tier toggle UI
       $tierButtons.forEach(btn => {
@@ -223,7 +274,7 @@
             $imageFields.classList.remove('hidden');
           } else {
             $imageFields.classList.add('hidden');
-            $imageInput.value = '';
+            hideImagePreview();
             $edits.value = '';
           }
         });
@@ -244,7 +295,17 @@
       });
       $dropArea.addEventListener('drop', (e) => {
         const files = e.dataTransfer.files;
-        if (files && files[0]) $imageInput.files = files;
+        if (files && files[0]) {
+          $imageInput.files = files;
+          showImagePreview(files[0]);
+        }
+      });
+
+      // Make drop area clickable (but not the remove button)
+      $dropArea.addEventListener('click', function(e) {
+        if (e.target.id !== 'remove-image') {
+          $imageInput.click();
+        }
       });
 
       // Character counter and platform change
@@ -387,6 +448,9 @@
         } else {
           $copyAll.classList.add('hidden');
         }
+
+        // Scroll to results
+        $results.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
       // Submit flow
@@ -431,12 +495,18 @@
               order_id: order.id,
               handler: async function (response) {
                 try {
-                  const verifyRes = await verifyPayment({
-                    razorpay_payment_id: response.razorpay_payment_id,
-                    razorpay_order_id: response.razorpay_order_id,
-                    razorpay_signature: response.razorpay_signature
+                  const verifyRes = await fetch('/verify-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      razorpay_payment_id: response.razorpay_payment_id,
+                      razorpay_order_id: response.razorpay_order_id,
+                      razorpay_signature: response.razorpay_signature
+                    })
                   });
-                  if (verifyRes.status !== 'ok') return reject(new Error('Payment verification failed'));
+                  if (!verifyRes.ok) return reject(new Error('Payment verification failed'));
+                  const vr = await verifyRes.json();
+                  if (vr.status !== 'ok') return reject(new Error('Payment verification failed'));
                   resolve();
                 } catch (err) { reject(err); }
               },
